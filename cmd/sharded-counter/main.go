@@ -4,30 +4,23 @@ import (
 	"flag"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/chowes/fun-with-concurrency/pkg/counter"
 )
 
-func writer(c *counter.Counter, threadID, iterations int64, barrier *atomic.Bool) {
-	for {
-		if barrier.Load() {
-			break
-		}
-	}
+func writer(c *counter.Counter, threadID, iterations int64, barrier *sync.RWMutex) {
+	barrier.RLock()
+	defer barrier.RUnlock()
 
 	for _ = range iterations {
 		c.Increment(threadID)
 	}
 }
 
-func reader(c *counter.Counter, interval time.Duration, maxValue int64, barrier *atomic.Bool) {
-	for {
-		if barrier.Load() {
-			break
-		}
-	}
+func reader(c *counter.Counter, interval time.Duration, maxValue int64, barrier *sync.RWMutex) {
+	barrier.RLock()
+	defer barrier.RUnlock()
 
 	for {
 		v := c.Read()
@@ -50,9 +43,12 @@ func main() {
 
 	c := counter.New(*writers)
 	var maxValue int64 = *iterations * *writers
-	var barrier atomic.Bool
 	var wg sync.WaitGroup
 
+	// We use this r/w lock to synchronize thread start times.
+	var barrier sync.RWMutex
+
+	barrier.Lock()
 	for i := range *writers {
 		wg.Add(1)
 		go func() {
@@ -69,9 +65,8 @@ func main() {
 		}()
 	}
 
+	barrier.Unlock()
 	startTime := time.Now()
-	barrier.Store(true)
-
 	wg.Wait()
 
 	totalTime := time.Since(startTime)
